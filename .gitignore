@@ -5,3 +5,23 @@ target
 node_modules
 test-ledger
 .yarn
+
+# Secrets & wallet files
+.env
+*.json.key
+wxmr-reserve-stagenet
+wxmr-reserve-stagenet.keys
+wxmr-test-sender
+wxmr-test-sender.keys
+target/deploy/*-keypair.json
+
+# Database
+mappings.db
+
+# Logs
+monero-wallet-cli.log
+monero-wallet-rpc.log
+*.log
+
+# OS
+Thumbs.db
