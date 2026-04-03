@@ -5,16 +5,15 @@ import { useEffect, useState } from "react";
 interface ReserveData {
   balanceXmr: string;
   unlockedXmr: string;
-  error?: string;
+  note?: string;
 }
 
 interface SupplyData {
   supplyXmr: string;
   mintAuthority: string | null;
-  error?: string;
 }
 
-interface BridgeTransaction {
+interface Tx {
   type: "deposit" | "burn";
   txHash: string;
   amountXmr: string;
@@ -26,16 +25,14 @@ interface BridgeTransaction {
 export default function Dashboard() {
   const [reserve, setReserve] = useState<ReserveData | null>(null);
   const [supply, setSupply] = useState<SupplyData | null>(null);
-  const [transactions, setTransactions] = useState<BridgeTransaction[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(true);
   const [solanaPubkey, setSolanaPubkey] = useState("");
   const [depositAddress, setDepositAddress] = useState<string | null>(null);
-  const [depositLoading, setDepositLoading] = useState(false);
-  const [depositError, setDepositError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function fetchData() {
+  async function refresh() {
     try {
       const [r, s, t] = await Promise.all([
         fetch("/api/reserve").then((res) => res.json()),
@@ -45,19 +42,17 @@ export default function Dashboard() {
       setReserve(r);
       setSupply(s);
       setTransactions(t.transactions || []);
-      setLastUpdated(new Date());
-    } catch (e) {
-      console.error(e);
+    } catch {
+      /* ignore */
     } finally {
       setLoading(false);
     }
   }
 
-  async function getDepositAddress() {
-    setDepositLoading(true);
-    setDepositError(null);
+  async function generateAddress() {
+    setBusy(true);
+    setError(null);
     setDepositAddress(null);
-
     try {
       const res = await fetch("/api/deposit-address", {
         method: "POST",
@@ -65,260 +60,261 @@ export default function Dashboard() {
         body: JSON.stringify({ solanaPubkey }),
       });
       const data = await res.json();
-      if (data.error) {
-        setDepositError(data.error);
-      } else {
-        setDepositAddress(data.subaddress);
-      }
-    } catch (e) {
-      setDepositError("Failed to generate deposit address");
+      if (data.error) setError(data.error);
+      else setDepositAddress(data.subaddress);
+    } catch {
+      setError("Failed to generate deposit address");
     } finally {
-      setDepositLoading(false);
+      setBusy(false);
     }
   }
 
-  function copyAddress() {
-    if (!depositAddress) return;
-    navigator.clipboard.writeText(depositAddress);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  function copy(text: string) {
+    navigator.clipboard.writeText(text);
   }
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
+    refresh();
+    const id = setInterval(refresh, 30000);
+    return () => clearInterval(id);
   }, []);
 
   const reserveXmr = parseFloat(reserve?.balanceXmr ?? "0");
   const supplyXmr = parseFloat(supply?.supplyXmr ?? "0");
   const ratio = supplyXmr > 0 ? reserveXmr / supplyXmr : 1;
-  const ratioColor = ratio >= 1 ? "#ff6600" : ratio >= 0.95 ? "#ca8a04" : "#dc2626";
 
   return (
-    <div className="min-h-screen text-white font-['Roboto',sans-serif]" style={{ background: "#0d0d0d" }}>
-
-    {/* Top bar */}
-    <div className="px-8 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid #222" }}>
-    <div className="flex items-center gap-4">
-    <div className="w-7 h-7 flex items-center justify-center text-xs font-bold" style={{ background: "#ff6600", color: "#fff" }}>
-    M
-    </div>
-    <span className="font-['Inter',sans-serif] text-sm tracking-widest uppercase text-white">wXMR</span>
-    <span className="text-xs tracking-widest uppercase hidden sm:block" style={{ color: "#444" }}>/ Reserve Dashboard</span>
-    </div>
-    <div className="flex items-center gap-6 text-xs tracking-wider uppercase" style={{ color: "#444" }}>
-    <span>{lastUpdated ? lastUpdated.toLocaleTimeString() : "—"}</span>
-    <span className="w-2 h-2 inline-block" style={{ background: loading ? "#333" : "#ff6600" }} />
-    </div>
-    </div>
-
-    {/* 2-col layout */}
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] min-h-[calc(100vh-57px)]">
-
-    {/* Left */}
-    <div className="px-8 py-16 space-y-16" style={{ borderRight: "1px solid #222" }}>
-
-    {/* Hero stat */}
-    <div className="space-y-4">
-    <p className="text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ color: "#555" }}>
-    XMR Reserve Balance
-    </p>
-    <div className="flex items-end gap-4">
-    <h1 className="font-['Inter',sans-serif] font-bold leading-none text-white" style={{ fontSize: "clamp(3rem, 8vw, 6rem)" }}>
-    {loading ? "—" : reserveXmr.toFixed(4)}
-    </h1>
-    <span className="text-xl mb-2 font-['Inter',sans-serif]" style={{ color: "#444" }}>XMR</span>
-    </div>
-    <p className="text-sm" style={{ color: "#555" }}>
-    Locked in stagenet reserve wallet. Auditable via public view key.
-    </p>
-    </div>
-
-    <div style={{ borderTop: "1px solid #222" }} />
-
-    {/* Stats */}
-    <div className="grid grid-cols-2 gap-0" style={{ border: "1px solid #222", boxShadow: "4px 4px 0px #ff6600" }}>
-    <div className="p-8" style={{ borderRight: "1px solid #222" }}>
-    <p className="text-xs tracking-widest uppercase mb-4 font-['Inter',sans-serif]" style={{ color: "#555" }}>wXMR Supply</p>
-    <p className="text-3xl font-bold font-['Inter',sans-serif] text-white">{loading ? "—" : supplyXmr.toFixed(4)}</p>
-    <p className="text-xs mt-2" style={{ color: "#444" }}>SPL token · 12 decimals</p>
-    </div>
-    <div className="p-8">
-    <p className="text-xs tracking-widest uppercase mb-4 font-['Inter',sans-serif]" style={{ color: "#555" }}>Collateral Ratio</p>
-    <p className="text-3xl font-bold font-['Inter',sans-serif]" style={{ color: ratioColor }}>
-    {loading ? "—" : `${(ratio * 100).toFixed(2)}%`}
-    </p>
-    <p className="text-xs mt-2" style={{ color: "#444" }}>{ratio >= 1 ? "Fully backed" : "Undercollateralised"}</p>
-    </div>
-    </div>
-
-    {/* Peg bar */}
-    <div className="space-y-3">
-    <div className="flex justify-between text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ color: "#555" }}>
-    <span>Backing</span>
-    <span style={{ color: ratioColor }}>{loading ? "—" : `${(ratio * 100).toFixed(2)}%`}</span>
-    </div>
-    <div className="relative w-full" style={{ height: "1px", background: "#222" }}>
-    <div
-    className="absolute top-0 left-0 transition-all duration-1000"
-    style={{ width: loading ? "0%" : `${Math.min(ratio * 100, 100)}%`, background: ratioColor, height: "3px", marginTop: "-1px" }}
-    />
-    </div>
-    </div>
-
-    <div style={{ borderTop: "1px solid #222" }} />
-
-    {/* Deposit widget */}
-    <div className="space-y-6">
-    <p className="text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ color: "#555" }}>
-    Deposit XMR → Get wXMR
-    </p>
-    <p className="text-xs leading-relaxed" style={{ color: "#444" }}>
-    Enter your Solana wallet address. You'll receive a unique XMR deposit address.
-    Send XMR to it and wXMR will be minted to your Solana wallet automatically.
-    </p>
-    <div className="flex gap-0">
-    <input
-    type="text"
-    placeholder="Solana wallet address"
-    value={solanaPubkey}
-    onChange={(e) => setSolanaPubkey(e.target.value)}
-    className="flex-1 px-4 py-3 text-xs font-mono text-white bg-transparent outline-none"
-    style={{ border: "1px solid #333", borderRight: "none" }}
-    />
-    <button
-    onClick={getDepositAddress}
-    disabled={depositLoading || !solanaPubkey}
-    className="px-6 py-3 text-xs tracking-widest uppercase font-['Inter',sans-serif] text-white transition-all duration-200 disabled:opacity-30"
-    style={{ border: "1px solid #333", background: depositLoading ? "#111" : "#ff6600", borderColor: "#ff6600" }}
-    >
-    {depositLoading ? "..." : "Generate"}
-    </button>
-    </div>
-
-    {depositError && (
-      <p className="text-xs" style={{ color: "#dc2626" }}>{depositError}</p>
-    )}
-
-    {depositAddress && (
-      <div className="space-y-3">
-      <p className="text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ color: "#555" }}>
-      Your XMR Deposit Address
-      </p>
-      <div
-      className="flex items-start gap-4 p-4"
-      style={{ border: "1px solid #333", background: "#111" }}
+    <div className="min-h-screen" style={{ color: "var(--text-primary)" }}>
+      {/* Header */}
+      <header
+        className="px-6 py-5 flex items-center justify-between"
+        style={{ borderBottom: "1px solid var(--border)" }}
       >
-      <p className="flex-1 text-xs font-mono break-all leading-relaxed" style={{ color: "#ff6600" }}>
-      {depositAddress}
-      </p>
-      <button
-      onClick={copyAddress}
-      className="text-xs tracking-widest uppercase font-['Inter',sans-serif] shrink-0 transition-all duration-200"
-      style={{ color: copied ? "#ff6600" : "#444" }}
-      >
-      {copied ? "Copied" : "Copy"}
-      </button>
-      </div>
-      <p className="text-xs" style={{ color: "#444" }}>
-      This address is unique to your wallet. Deposits confirmed after 10 blocks.
-      </p>
-      </div>
-    )}
-    </div>
-
-    <div style={{ borderTop: "1px solid #222" }} />
-
-    {/* Recent transactions */}
-    <div className="space-y-6">
-    <p className="text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ color: "#555" }}>
-    Recent Bridge Transactions
-    </p>
-    {transactions.length === 0 ? (
-      <p className="text-xs" style={{ color: "#444" }}>No transactions yet.</p>
-    ) : (
-      <div style={{ border: "1px solid #222" }}>
-        {/* Header */}
-        <div className="grid grid-cols-[auto_1fr_auto_auto] gap-4 px-4 py-3 text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ borderBottom: "1px solid #222", color: "#555" }}>
-          <span>Type</span>
-          <span>Destination</span>
-          <span>Amount</span>
-          <span>Status</span>
-        </div>
-        {/* Rows */}
-        {transactions.slice(0, 10).map((tx, i) => (
+        <div className="flex items-center gap-3">
           <div
-            key={i}
-            className="grid grid-cols-[auto_1fr_auto_auto] gap-4 px-4 py-3 text-xs font-mono"
-            style={{
-              borderTop: i > 0 ? "1px solid #1a1a1a" : "none",
-              color: "#888",
-            }}
+            className="w-6 h-6 flex items-center justify-center text-[10px] font-bold rounded"
+            style={{ background: "var(--accent)", color: "#fff" }}
           >
-            <span
-              className="uppercase tracking-wider font-['Inter',sans-serif] font-bold"
-              style={{ color: tx.type === "deposit" ? "#ff6600" : "#a855f7" }}
-            >
-              {tx.type === "deposit" ? "↓ Deposit" : "↑ Burn"}
+            M
+          </div>
+          <span className="text-sm font-medium tracking-wide">wXMR</span>
+        </div>
+        <button
+          onClick={refresh}
+          className="text-xs tracking-wide px-4 py-2 rounded transition-colors"
+          style={{
+            color: "var(--text-secondary)",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+          }}
+          onMouseEnter={(e) => {
+            (e.target as HTMLElement).style.color = "var(--text-primary)";
+            (e.target as HTMLElement).style.borderColor = "var(--text-muted)";
+          }}
+          onMouseLeave={(e) => {
+            (e.target as HTMLElement).style.color = "var(--text-secondary)";
+            (e.target as HTMLElement).style.borderColor = "var(--border)";
+          }}
+        >
+          Refresh
+        </button>
+      </header>
+
+      <main className="max-w-2xl mx-auto px-6 py-16 space-y-12">
+        {/* Reserve balance */}
+        <div>
+          <p className="text-xs tracking-wide uppercase" style={{ color: "var(--text-muted)" }}>
+            XMR Reserve
+          </p>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-5xl font-semibold tracking-tight">
+              {loading ? "—" : reserveXmr.toFixed(4)}
             </span>
-            <span className="text-[#666]">{tx.destination}</span>
-            <span style={{ color: "#ccc" }}>{tx.amountXmr} XMR</span>
-            <span
-              style={{
-                color: tx.status === "confirmed" || tx.status === "released" ? "#22c55e" : tx.status === "failed" ? "#dc2626" : "#ca8a04",
-              }}
-            >
-              {tx.status}
+            <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+              XMR
             </span>
           </div>
-        ))}
-      </div>
-    )}
-    </div>
-    </div>
+        </div>
 
-    {/* Right */}
-    <div className="px-8 py-16 space-y-12" style={{ background: "#111" }}>
+        {/* Stats row */}
+        <div className="grid grid-cols-3 gap-6">
+          <Stat label="wXMR Supply" value={loading ? "—" : supplyXmr.toFixed(4)} sub="12 decimals" />
+          <Stat
+            label="Ratio"
+            value={loading ? "—" : `${(ratio * 100).toFixed(1)}%`}
+            sub={ratio >= 1 ? "Fully backed" : "Undercollateralised"}
+            accent={ratio >= 1 ? "var(--green)" : "var(--yellow)"}
+          />
+          <Stat
+            label="Unlocked"
+            value={loading ? "—" : parseFloat(reserve?.unlockedXmr ?? "0").toFixed(4)}
+            sub="XMR"
+          />
+        </div>
+
+        {/* Divider */}
+        <div style={{ borderTop: "1px solid var(--border)" }} />
+
+        {/* Deposit */}
+        <div>
+          <p className="text-xs tracking-wide uppercase mb-4" style={{ color: "var(--text-muted)" }}>
+            Deposit XMR
+          </p>
+          <div className="flex gap-0">
+            <input
+              type="text"
+              placeholder="Solana address"
+              value={solanaPubkey}
+              onChange={(e) => setSolanaPubkey(e.target.value)}
+              className="flex-1 px-3 py-2.5 text-xs font-mono outline-none"
+              style={{
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRight: "none",
+                borderRadius: "6px 0 0 6px",
+                color: "var(--text-primary)",
+              }}
+            />
+            <button
+              onClick={generateAddress}
+              disabled={busy || !solanaPubkey}
+              className="px-5 py-2.5 text-xs tracking-wide rounded-r transition-colors disabled:opacity-40"
+              style={{
+                background: busy ? "var(--border)" : "var(--accent)",
+                color: "#fff",
+                border: "1px solid var(--accent)",
+              }}
+            >
+              {busy ? "..." : "Generate"}
+            </button>
+          </div>
+
+          {error && <p className="mt-3 text-xs" style={{ color: "var(--red)" }}>{error}</p>}
+
+          {depositAddress && (
+            <div
+              className="mt-4 flex items-start gap-3 px-3 py-3"
+              style={{
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: "6px",
+              }}
+            >
+              <span
+                className="flex-1 text-xs font-mono break-all leading-relaxed select-all"
+                style={{ color: "var(--accent)" }}
+              >
+                {depositAddress}
+              </span>
+              <button
+                onClick={() => copy(depositAddress)}
+                className="text-xs shrink-0 transition-colors"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Copy
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div style={{ borderTop: "1px solid var(--border)" }} />
+
+        {/* Transactions */}
+        <div>
+          <p className="text-xs tracking-wide uppercase mb-4" style={{ color: "var(--text-muted)" }}>
+            Transactions
+          </p>
+          {transactions.length === 0 ? (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>No transactions yet.</p>
+          ) : (
+            <div className="space-y-0">
+              {transactions.slice(0, 10).map((tx, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between py-3"
+                  style={{
+                    borderBottom: i < 9 ? "1px solid var(--border)" : "none",
+                  }}
+                >
+                  <div className="flex items-center gap-4">
+                    <span
+                      className="text-xs font-medium tracking-wide"
+                      style={{
+                        color: tx.type === "deposit" ? "var(--accent)" : "var(--purple)",
+                      }}
+                    >
+                      {tx.type === "deposit" ? "Deposit" : "Burn"}
+                    </span>
+                    <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+                      {tx.destination}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <span className="text-xs font-mono">{tx.amountXmr}</span>
+                    <StatusBadge status={tx.status} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer
+        className="px-6 py-6 flex items-center justify-between"
+        style={{ borderTop: "1px solid var(--border)" }}
+      >
+        <div className="flex items-center gap-4 text-xs" style={{ color: "var(--text-muted)" }}>
+          <span>Stagenet</span>
+          <span>·</span>
+          <span>Localnet</span>
+        </div>
+        {reserve?.note && (
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{reserve.note}</p>
+        )}
+      </footer>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  accent?: string;
+}) {
+  return (
     <div>
-    <p className="text-xs tracking-widest uppercase mb-4 font-['Inter',sans-serif]" style={{ color: "#555" }}>Reserve Address</p>
-    <p className="text-xs break-all leading-relaxed font-mono" style={{ color: "#666" }}>
-    59Qp8URJKRMFhzZhiELXucU4znvkNkydKdU2QE2TA2BVdnRxAhaHGw6CRgPwevHNXPLEbyxqj1zj5T5FxmqsRvheHdJ7oBm
-    </p>
+      <p className="text-[11px] tracking-wide uppercase" style={{ color: "var(--text-muted)" }}>
+        {label}
+      </p>
+      <p className="text-xl font-medium mt-0.5" style={accent ? { color: accent } : {}}>
+        {value}
+      </p>
+      <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+        {sub}
+      </p>
     </div>
-    <div style={{ borderTop: "1px solid #1e1e1e" }} />
-    <div>
-    <p className="text-xs tracking-widest uppercase mb-4 font-['Inter',sans-serif]" style={{ color: "#555" }}>Mint Authority</p>
-    <p className="text-xs break-all leading-relaxed font-mono" style={{ color: "#666" }}>{supply?.mintAuthority ?? "—"}</p>
-    </div>
-    <div style={{ borderTop: "1px solid #1e1e1e" }} />
-    <div>
-    <p className="text-xs tracking-widest uppercase mb-4 font-['Inter',sans-serif]" style={{ color: "#555" }}>Network</p>
-    <div className="space-y-2 text-xs" style={{ color: "#666" }}>
-    <div className="flex justify-between"><span>XMR</span><span className="font-mono">Stagenet</span></div>
-    <div className="flex justify-between"><span>Solana</span><span className="font-mono">Localnet</span></div>
-    <div className="flex justify-between"><span>Token Program</span><span className="font-mono">SPL Token</span></div>
-    </div>
-    </div>
-    <div style={{ borderTop: "1px solid #1e1e1e" }} />
-    <div>
-    <p className="text-xs tracking-widest uppercase mb-4 font-['Inter',sans-serif]" style={{ color: "#555" }}>Verification</p>
-    <p className="text-xs leading-relaxed" style={{ color: "#555" }}>
-    Reserve balance is read directly from monero-wallet-rpc using the reserve wallet view key.
-    wXMR supply is read from the Solana token program on-chain. No intermediaries.
-    </p>
-    </div>
-    <button
-    onClick={fetchData}
-    className="w-full py-3 text-xs tracking-widest uppercase font-['Inter',sans-serif] text-white transition-all duration-200"
-    style={{ border: "1px solid #333", boxShadow: "2px 2px 0px #ff6600", background: "transparent" }}
-    onMouseEnter={(e) => { (e.target as HTMLButtonElement).style.background = "#ff6600"; (e.target as HTMLButtonElement).style.borderColor = "#ff6600"; }}
-    onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.background = "transparent"; (e.target as HTMLButtonElement).style.borderColor = "#333"; }}
-    >
-    Refresh
-    </button>
-    </div>
-    </div>
-    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const color =
+    status === "confirmed" || status === "released"
+      ? "var(--green)"
+      : status === "failed"
+        ? "var(--red)"
+        : "var(--yellow)";
+  return (
+    <span className="text-[11px] font-medium tracking-wide uppercase" style={{ color }}>
+      {status}
+    </span>
   );
 }
