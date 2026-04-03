@@ -16,6 +16,15 @@ const rawKeypair = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
 const authority = Keypair.fromSecretKey(Uint8Array.from(rawKeypair));
 
 const processed = new Set<string>();
+const recentTransactions: Array<{
+  type: "deposit" | "burn";
+  txHash: string;
+  amount: string;
+  amountXmr: string;
+  destination: string;
+  timestamp: string;
+  status: string;
+}> = [];
 
 async function mintWxmr(
   program: anchor.Program,
@@ -44,6 +53,19 @@ async function mintWxmr(
     .signers([authority])
     .rpc();
 
+  const txSig = "confirmed"; // simplified — in prod we'd capture the signature
+  recentTransactions.unshift({
+    type: "deposit",
+    txHash: txHash.slice(0, 16) + "...",
+    amount: amount.toString(),
+    amountXmr: (Number(amount) / 1e12).toFixed(6),
+    destination: recipientPubkey.toBase58().slice(0, 8) + "..." + recipientPubkey.toBase58().slice(-4),
+    timestamp: new Date().toISOString(),
+    status: "confirmed",
+  });
+  // Keep only last 20
+  if (recentTransactions.length > 20) recentTransactions.pop();
+
   console.log(`[MINT] ${amount} piconero -> ${recipientPubkey.toBase58()}`);
 }
 
@@ -57,10 +79,26 @@ async function watchBurns(program: anchor.Program) {
     const amount = BigInt(event.amount.toString());
     console.log(`[BURN] ${amount} piconero -> ${xmrAddress}`);
 
+    recentTransactions.unshift({
+      type: "burn",
+      txHash: "burn-" + xmrAddress.slice(0, 8) + "...",
+      amount: amount.toString(),
+      amountXmr: (Number(amount) / 1e12).toFixed(6),
+      destination: xmrAddress.slice(0, 8) + "..." + xmrAddress.slice(-4),
+      timestamp: new Date().toISOString(),
+      status: "processing",
+    });
+    if (recentTransactions.length > 20) recentTransactions.pop();
+
     try {
       await transfer(amount, xmrAddress);
+      // Update status
+      const tx = recentTransactions.find(t => t.destination === xmrAddress.slice(0, 8) + "..." + xmrAddress.slice(-4) && t.status === "processing");
+      if (tx) tx.status = "released";
     } catch (e) {
       console.error(`[ERROR] Failed to release XMR:`, e);
+      const tx = recentTransactions.find(t => t.destination === xmrAddress.slice(0, 8) + "..." + xmrAddress.slice(-4) && t.status === "processing");
+      if (tx) tx.status = "failed";
     }
   });
 
@@ -123,6 +161,12 @@ async function main() {
         const subaddress = await createSubaddress(solanaPubkey);
         res.writeHead(200);
         res.end(JSON.stringify({ subaddress }));
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/transactions") {
+        res.writeHead(200);
+        res.end(JSON.stringify({ transactions: recentTransactions }));
         return;
       }
 

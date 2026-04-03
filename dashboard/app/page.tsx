@@ -14,9 +14,19 @@ interface SupplyData {
   error?: string;
 }
 
+interface BridgeTransaction {
+  type: "deposit" | "burn";
+  txHash: string;
+  amountXmr: string;
+  destination: string;
+  timestamp: string;
+  status: string;
+}
+
 export default function Dashboard() {
   const [reserve, setReserve] = useState<ReserveData | null>(null);
   const [supply, setSupply] = useState<SupplyData | null>(null);
+  const [transactions, setTransactions] = useState<BridgeTransaction[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [solanaPubkey, setSolanaPubkey] = useState("");
@@ -27,12 +37,14 @@ export default function Dashboard() {
 
   async function fetchData() {
     try {
-      const [r, s] = await Promise.all([
+      const [r, s, t] = await Promise.all([
         fetch("/api/reserve").then((res) => res.json()),
-                                       fetch("/api/supply").then((res) => res.json()),
+        fetch("/api/supply").then((res) => res.json()),
+        fetch("/api/transactions").then((res) => res.json()),
       ]);
       setReserve(r);
       setSupply(s);
+      setTransactions(t.transactions || []);
       setLastUpdated(new Date());
     } catch (e) {
       console.error(e);
@@ -212,6 +224,55 @@ export default function Dashboard() {
       <p className="text-xs" style={{ color: "#444" }}>
       This address is unique to your wallet. Deposits confirmed after 10 blocks.
       </p>
+      </div>
+    )}
+    </div>
+
+    <div style={{ borderTop: "1px solid #222" }} />
+
+    {/* Recent transactions */}
+    <div className="space-y-6">
+    <p className="text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ color: "#555" }}>
+    Recent Bridge Transactions
+    </p>
+    {transactions.length === 0 ? (
+      <p className="text-xs" style={{ color: "#444" }}>No transactions yet.</p>
+    ) : (
+      <div style={{ border: "1px solid #222" }}>
+        {/* Header */}
+        <div className="grid grid-cols-[auto_1fr_auto_auto] gap-4 px-4 py-3 text-xs tracking-widest uppercase font-['Inter',sans-serif]" style={{ borderBottom: "1px solid #222", color: "#555" }}>
+          <span>Type</span>
+          <span>Destination</span>
+          <span>Amount</span>
+          <span>Status</span>
+        </div>
+        {/* Rows */}
+        {transactions.slice(0, 10).map((tx, i) => (
+          <div
+            key={i}
+            className="grid grid-cols-[auto_1fr_auto_auto] gap-4 px-4 py-3 text-xs font-mono"
+            style={{
+              borderTop: i > 0 ? "1px solid #1a1a1a" : "none",
+              color: "#888",
+            }}
+          >
+            <span
+              className="uppercase tracking-wider font-['Inter',sans-serif] font-bold"
+              style={{ color: tx.type === "deposit" ? "#ff6600" : "#a855f7" }}
+            >
+              {tx.type === "deposit" ? "↓ Deposit" : "↑ Burn"}
+            </span>
+            <span className="text-[#666]">{tx.destination}</span>
+            <span style={{ color: "#ccc" }}>{tx.amountXmr} XMR</span>
+            <span
+              style={{
+                color: tx.status === "confirmed" || tx.status === "released" ? "#22c55e" : tx.status === "failed" ? "#dc2626" : "#ca8a04",
+              }}
+            >
+              {tx.status}
+            </span>
+          </div>
+        ))}
       </div>
     )}
     </div>
